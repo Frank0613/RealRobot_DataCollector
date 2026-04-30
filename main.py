@@ -1,8 +1,24 @@
+import argparse
 import os
 import sys
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Robot IK teleop / dataset tools")
+    parser.add_argument(
+        "--readfile",
+        type=str,
+        help="Print HDF5 structure of datasets/<NAME>.hdf5 and exit",
+    )
+    args, _ = parser.parse_known_args()
+
+    # --readfile: do not boot Isaac Sim, just inspect the file
+    if args.readfile:
+        from tools.hdf5_reader import print_structure_by_path
+        path = os.path.join("datasets", f"{args.readfile}.hdf5")
+        print_structure_by_path(path)
+        return
+
     print("Starting Isaac Sim...")
     from isaacsim import SimulationApp
     simulation_app = SimulationApp({"headless": False})
@@ -13,6 +29,7 @@ def main():
 
     from input_manager import InputManager
     from robot_controller import RobotIKController
+    from data_collector import DataCollector
 
     # ---- pick which arm to use here ----
     # To switch to a different arm, swap this import for another robot package
@@ -45,6 +62,10 @@ def main():
 
     controller = RobotIKController(world=world, cfg=robot_cfg)
     input_mgr = InputManager()
+    data_collector = DataCollector(
+        save_dir="datasets",
+        filename=f"{robot_cfg.ROBOT_NAME}.hdf5",
+    )
 
     world.reset()
     controller.initialize_handles()
@@ -54,7 +75,8 @@ def main():
     print(" Move    : WASDQE")
     print(" Rotate  : Z/X  T/G  C/V")
     print(" Gripper : K (toggle)")
-    print(" Reset   : R")
+    print(" Save    : B (save demo + reset)")
+    print(" Reset   : R (discards demo if recording)")
     print("==========================================")
 
     needs_reset = False
@@ -66,11 +88,26 @@ def main():
                 input_mgr.reset()
                 needs_reset = False
 
-            delta_pos, delta_rot, gripper_cmd, reset_cmd, _ = input_mgr.get_command()
+            (delta_pos, delta_rot, gripper_cmd,
+             reset_cmd, save_cmd, is_any_action) = input_mgr.get_command()
+
+            # Auto-start recording on the first user action
+            if not data_collector.recording and is_any_action:
+                data_collector.start()
+
+            # B: save current demo, then reset
+            if save_cmd and data_collector.recording:
+                data_collector.save(controller)
+                needs_reset = True
+
+            # R: reset; if mid-recording, discard the unsaved demo
             if reset_cmd:
+                if data_collector.recording:
+                    data_collector.discard()
                 needs_reset = True
 
             controller.apply_control(delta_pos, gripper_cmd, delta_rot)
+            data_collector.collect_frame(controller)
             world.step(render=True)
         else:
             simulation_app.update()

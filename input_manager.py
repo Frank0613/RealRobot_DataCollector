@@ -14,7 +14,8 @@ class InputManager:
       WASDQE         translate target (x/y/z)
       Z/X T/G C/V    rotate target around x/y/z
       K              toggle gripper
-      R              reset
+      B              save recorded demo (then reset)
+      R              reset (discard demo if recording)
     """
 
     def __init__(self):
@@ -25,12 +26,14 @@ class InputManager:
         self.gripper_is_open = True
         self.prev_k = False
         self.prev_r = False
+        self.prev_b = False
 
     def reset(self):
         """Reset all latched input state."""
         self.gripper_is_open = True
         self.prev_k = False
         self.prev_r = False
+        self.prev_b = False
 
     def _rising(self, key, prev_attr):
         cur = bool(self._input.get_keyboard_value(self._keyboard, key))
@@ -40,7 +43,7 @@ class InputManager:
 
     def get_command(self):
         """
-        Returns: delta_pos(3,), delta_rot(3,), gripper_cmd, reset_cmd, is_any_action
+        Returns: delta_pos(3,), delta_rot(3,), gripper_cmd, reset_cmd, save_cmd, is_any_action
         gripper_cmd: 0 = open, 1 = closed
         """
         K = carb.input.KeyboardInput
@@ -85,5 +88,8 @@ class InputManager:
         # Reset (rising edge)
         _, reset_cmd = self._rising(K.R, "prev_r")
 
+        # Save demo (rising edge)
+        _, save_cmd = self._rising(K.B, "prev_b")
+
         is_any_action = any_move or any_rot or k_cur
-        return delta, delta_rot, gripper_cmd, reset_cmd, is_any_action
+        return delta, delta_rot, gripper_cmd, reset_cmd, save_cmd, is_any_action
