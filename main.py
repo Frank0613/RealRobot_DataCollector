@@ -10,6 +10,11 @@ def main():
         type=str,
         help="Print HDF5 structure of datasets/<NAME>.hdf5 and exit",
     )
+    parser.add_argument(
+        "--replay",
+        type=str,
+        help="Replay every demo in datasets/<NAME>.hdf5 once, then close",
+    )
     args, _ = parser.parse_known_args()
 
     # --readfile: do not boot Isaac Sim, just inspect the file
@@ -29,7 +34,7 @@ def main():
 
     from input_manager import InputManager
     from robot_controller import RobotIKController
-    from data_collector import DataCollector
+    from tools.record import DataCollector
 
     # ---- pick which arm to use here ----
     # To switch to a different arm, swap this import for another robot package
@@ -61,14 +66,23 @@ def main():
     add_lights()
 
     controller = RobotIKController(world=world, cfg=robot_cfg)
+
+    world.reset()
+    controller.initialize_handles()
+
+    # --replay: play the dataset once and exit
+    if args.replay:
+        from tools.replay import replay_dataset
+        path = os.path.join("datasets", f"{args.replay}.hdf5")
+        replay_dataset(world, controller, path)
+        simulation_app.close()
+        return
+
     input_mgr = InputManager()
     data_collector = DataCollector(
         save_dir="datasets",
         filename=f"{robot_cfg.ROBOT_NAME}.hdf5",
     )
-
-    world.reset()
-    controller.initialize_handles()
 
     print("==========================================")
     print(f" {robot_cfg.ROBOT_NAME} IK Teleop")
