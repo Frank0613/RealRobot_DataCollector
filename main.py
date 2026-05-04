@@ -28,6 +28,16 @@ def main():
     from isaacsim import SimulationApp
     simulation_app = SimulationApp({"headless": False})
 
+    # Enable ROS2 Bridge with internal humble libraries.
+    # Setting must be applied before the extension loads.
+    import carb
+    carb.settings.get_settings().set(
+        "/exts/isaacsim.ros2.bridge/ros_distro", "humble"
+    )
+    from isaacsim.core.utils.extensions import enable_extension
+    enable_extension("isaacsim.ros2.bridge")
+    simulation_app.update()
+
     from omni.isaac.core import World
     import omni.usd
     from pxr import UsdLux, Sdf, Gf
