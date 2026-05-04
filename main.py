@@ -101,6 +101,7 @@ def main():
                 controller.initialize_handles()
                 input_mgr.reset()
                 needs_reset = False
+                print("[Env] Reset")
 
             (delta_pos, delta_rot, gripper_cmd,
              reset_cmd, save_cmd, is_any_action) = input_mgr.get_command()
