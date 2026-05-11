@@ -8,13 +8,22 @@ class DataCollector:
     """
     Minimal demo recorder. One HDF5 file, multiple demos appended under /data.
 
-    Per frame it stores:
+    Per frame it stores (sim side):
       - arm_joint_pos  (n_arm_joints,) float32
       - arm_joint_vel  (n_arm_joints,) float32
       - gripper_pos    scalar float32   (only if the robot has a gripper)
 
+    Per frame it stores (real side, only when a `ros_sub` is provided AND
+    a synced triple has been cached — frames without synced data are skipped):
+      - real_joint_pos  (n_real_joints,) float32
+      - real_joint_vel  (n_real_joints,) float32
+      - real_rgb        (H, W, 3) uint8
+      - real_depth      (H, W) uint16 or float32
+      - real_stamp      scalar float64 (rgb header.stamp in seconds)
+
     Per demo it stores attrs:
       - num_samples, robot_name, timestamp, arm_joint_names
+      - real_joint_names  (only when ros_sub provided synced data)
     """
 
     def __init__(self, save_dir="datasets", filename="dataset.hdf5"):
@@ -52,7 +61,7 @@ class DataCollector:
 
     # ---------- per-step capture ----------
 
-    def collect_frame(self, controller):
+    def collect_frame(self, controller, ros_sub=None):
         if not self.recording:
             return
         if controller._arm_idx is None:
@@ -63,6 +72,15 @@ class DataCollector:
         if qp is None or qv is None:
             return
 
+        # Strict-sync rule: if a real-robot subscriber is attached but no
+        # synchronized triple has arrived yet, skip this frame entirely so
+        # every saved frame contains both sim and real data.
+        real_data = None
+        if ros_sub is not None:
+            real_data = ros_sub.get_latest()
+            if real_data is None:
+                return
+
         arm_idx = controller._arm_idx
         frame = {
             "arm_joint_pos": np.asarray(qp[arm_idx], dtype=np.float32),
@@ -71,11 +89,14 @@ class DataCollector:
         if controller._gripper_idx is not None:
             frame["gripper_pos"] = np.float32(qp[controller._gripper_idx])
 
+        if real_data is not None:
+            frame.update(real_data)
+
         self.frames.append(frame)
 
     # ---------- save ----------
 
-    def save(self, controller):
+    def save(self, controller, ros_sub=None):
         """Save the current demo to HDF5 and reset state. Returns True on success."""
         if not self.frames:
             print("[DataCollector] Nothing to save")
@@ -93,12 +114,20 @@ class DataCollector:
             demo.attrs["robot_name"] = cfg.ROBOT_NAME
             demo.attrs["timestamp"] = datetime.now().isoformat()
             demo.attrs["arm_joint_names"] = list(cfg.ARM_JOINT_NAMES)
+            if ros_sub is not None and ros_sub.real_joint_names:
+                demo.attrs["real_joint_names"] = ros_sub.real_joint_names
 
-            # Stack each key across frames into one dataset
+            # Stack each key across frames into one dataset; compress images.
             keys = self.frames[0].keys()
             for key in keys:
                 arr = np.stack([fr[key] for fr in self.frames])
-                demo.create_dataset(key, data=arr)
+                if arr.ndim >= 3:  # image streams (T,H,W) or (T,H,W,C)
+                    demo.create_dataset(
+                        key, data=arr,
+                        compression="gzip", compression_opts=4, chunks=True,
+                    )
+                else:
+                    demo.create_dataset(key, data=arr)
 
             root.attrs["total"] = demo_id + 1
 

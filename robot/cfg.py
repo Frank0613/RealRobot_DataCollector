@@ -39,3 +39,13 @@ KPS_ARM = 1e5
 KDS_ARM = 1e3
 KPS_GRIPPER = 1e4
 KDS_GRIPPER = 1e2
+
+# ---------- Real robot ROS2 topics (data collection) ----------
+# These are subscribed alongside the sim and saved into the same HDF5 demo.
+# ApproximateTimeSynchronizer pairs the three topics by header.stamp.
+REAL_JOINT_STATE_TOPIC = "/arm_joint_states"
+REAL_RGB_TOPIC         = "/k4a/rgb/image_raw/compressed"
+REAL_RGB_COMPRESSED    = True   # True → sensor_msgs/CompressedImage, False → sensor_msgs/Image
+REAL_DEPTH_TOPIC       = "/k4a/depth_to_rgb/image_raw"
+REAL_SYNC_SLOP         = 0.05   # seconds — max time skew between the 3 topics
+REAL_SYNC_QUEUE_SIZE   = 10

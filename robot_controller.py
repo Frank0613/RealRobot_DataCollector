@@ -172,6 +172,10 @@ class RobotIKController:
         if current_joints is None or self._arm_idx is None:
             return
 
+        # Snapshot last reachable target so we can revert if IK fails
+        prev_target_pos = self.target_pos.copy()
+        prev_target_rot = self.target_rot.copy()
+
         if np.linalg.norm(delta_pos) > 0:
             self.target_pos = self.target_pos + delta_pos
 
@@ -184,9 +188,6 @@ class RobotIKController:
             q = (r_delta * r_current).as_quat()
             self.target_rot = np.array([q[3], q[0], q[1], q[2]])
 
-        # Move the marker first — even if IK fails the user sees their target
-        self._sync_marker_pose()
-
         warm_start = current_joints[self._arm_idx]
         ik_results, success = self.kinematics_solver.compute_inverse_kinematics(
             frame_name=self.cfg.EE_FRAME_NAME,
@@ -196,8 +197,14 @@ class RobotIKController:
         )
 
         if not success:
-            print(f"[ArmIKController] IK failed | target_pos={self.target_pos}")
+            # Out of reach: snap target (and marker) back to last reachable pose
+            self.target_pos = prev_target_pos
+            self.target_rot = prev_target_rot
+            self._sync_marker_pose()
+            print(f"[ArmIKController] IK failed | target reverted to {self.target_pos}")
             return
+
+        self._sync_marker_pose()
 
         action = current_joints.copy()
         for i, idx in enumerate(self._arm_idx):

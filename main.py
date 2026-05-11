@@ -15,6 +15,11 @@ def main():
         type=str,
         help="Replay every demo in datasets/<NAME>.hdf5 once, then close",
     )
+    parser.add_argument(
+        "--sim",
+        action="store_true",
+        help="Sim-only mode: skip the real-robot ROS2 subscriber (no joint_state/RGB/depth)",
+    )
     args, _ = parser.parse_known_args()
 
     # --readfile: do not boot Isaac Sim, just inspect the file
@@ -94,6 +99,23 @@ def main():
         filename=f"{robot_cfg.ROBOT_NAME}.hdf5",
     )
 
+    # Real-robot ROS2 subscriber (joint_state + RGB + depth, time-synced).
+    # If the topics are not yet publishing, get_latest() stays None and the
+    # data collector simply skips frames until synced data arrives.
+    if args.sim:
+        ros_sub = None
+        print("[Mode] --sim: real-robot ROS2 subscription disabled")
+    else:
+        from tools.ros_subscriber import RealRobotSubscriber
+        ros_sub = RealRobotSubscriber(
+            joint_topic=robot_cfg.REAL_JOINT_STATE_TOPIC,
+            rgb_topic=robot_cfg.REAL_RGB_TOPIC,
+            depth_topic=robot_cfg.REAL_DEPTH_TOPIC,
+            rgb_compressed=robot_cfg.REAL_RGB_COMPRESSED,
+            slop=robot_cfg.REAL_SYNC_SLOP,
+            queue_size=robot_cfg.REAL_SYNC_QUEUE_SIZE,
+        )
+
     print("==========================================")
     print(f" {robot_cfg.ROBOT_NAME} IK Teleop")
     print(" Move    : WASDQE")
@@ -104,40 +126,43 @@ def main():
     print("==========================================")
 
     needs_reset = False
-    while simulation_app.is_running():
-        if world.is_playing():
-            if needs_reset:
-                world.reset()
-                controller.initialize_handles()
-                input_mgr.reset()
-                needs_reset = False
-                print("[Env] Reset")
+    try:
+        while simulation_app.is_running():
+            if world.is_playing():
+                if needs_reset:
+                    world.reset()
+                    controller.initialize_handles()
+                    input_mgr.reset()
+                    needs_reset = False
+                    print("[Env] Reset")
 
-            (delta_pos, delta_rot, gripper_cmd,
-             reset_cmd, save_cmd, is_any_action) = input_mgr.get_command()
+                (delta_pos, delta_rot, gripper_cmd,
+                 reset_cmd, save_cmd, is_any_action) = input_mgr.get_command()
 
-            # Auto-start recording on the first user action
-            if not data_collector.recording and is_any_action:
-                data_collector.start()
+                # Auto-start recording on the first user action
+                if not data_collector.recording and is_any_action:
+                    data_collector.start()
 
-            # B: save current demo, then reset
-            if save_cmd and data_collector.recording:
-                data_collector.save(controller)
-                needs_reset = True
+                # B: save current demo, then reset
+                if save_cmd and data_collector.recording:
+                    data_collector.save(controller, ros_sub=ros_sub)
+                    needs_reset = True
 
-            # R: reset; if mid-recording, discard the unsaved demo
-            if reset_cmd:
-                if data_collector.recording:
-                    data_collector.discard()
-                needs_reset = True
+                # R: reset; if mid-recording, discard the unsaved demo
+                if reset_cmd:
+                    if data_collector.recording:
+                        data_collector.discard()
+                    needs_reset = True
 
-            controller.apply_control(delta_pos, gripper_cmd, delta_rot)
-            data_collector.collect_frame(controller)
-            world.step(render=True)
-        else:
-            simulation_app.update()
-
-    simulation_app.close()
+                controller.apply_control(delta_pos, gripper_cmd, delta_rot)
+                data_collector.collect_frame(controller, ros_sub=ros_sub)
+                world.step(render=True)
+            else:
+                simulation_app.update()
+    finally:
+        if ros_sub is not None:
+            ros_sub.shutdown()
+        simulation_app.close()
 
 
 if __name__ == "__main__":
